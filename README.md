@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="logo.png" alt="AffinityRPC Logo" width="150"/>
-</p>
-
 <h1 align="center">AffinityRPC</h1>
 
 <p align="center">
