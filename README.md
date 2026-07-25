@@ -18,6 +18,8 @@ A custom Discord Rich Presence integration for Affinity Studio by Canva. It disp
 
 # AffinityRPC - Discord Rich Presence
 
+<img width="2000" height="1000" alt="PRUEBA" src="https://github.com/user-attachments/assets/e59f9e40-2ea3-4804-9537-4ecd5567bb66" />
+
 A custom Discord Rich Presence integration for Affinity Studio by Canva. It displays your currently active project status directly on your Discord profile.
 
 ## Prerequisites
