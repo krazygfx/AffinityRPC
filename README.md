@@ -1,7 +1,7 @@
 <h1 align="center">AffinityRPC</h1>
 
 <p align="center">
-  <strong>Discord Rich Presence integration for the Affinity Suite</strong>
+  <strong>Discord Rich Presence integration for Affinity Studio by Canva</strong>
 </p>
 
 <p align="center">
@@ -16,11 +16,11 @@
 
 
 
-A custom Discord Rich Presence integration for the Affinity Suite (Photo, Designer, and Publisher). It displays your currently active project status directly on your Discord profile using a clean, native, and lightweight interface.
+A custom Discord Rich Presence integration for Affinity Studio by Canva. It displays your currently active project status directly on your Discord profile using a clean, native, and lightweight interface.
 
 # AffinityRPC - Discord Rich Presence
 
-A custom Discord Rich Presence integration for Affinity by Canva. It displays your currently active project status directly on your Discord profile.
+A custom Discord Rich Presence integration for Affinity Studio by Canva. It displays your currently active project status directly on your Discord profile.
 
 ## Prerequisites
 
