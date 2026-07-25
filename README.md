@@ -5,8 +5,11 @@
 </p>
 
 <p align="center">
+  
   <img src="https://img.shields.io/badge/version-1.0.0-blue.svg" alt="Version">
+  
   <img src="https://img.shields.io/badge/platform-Windows-lightgrey.svg" alt="Platform">
+  
   <img src="https://github.com/user-attachments/assets/7f50f19d-c246-4663-9364-88c796640d98" alt="License">
 </p>
 
