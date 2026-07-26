@@ -6,6 +6,7 @@ import requests
 import threading
 import winreg
 import locale
+import psutil
 from pypresence import Presence
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QPushButton, QSystemTrayIcon, QMenu, QCheckBox)
@@ -50,7 +51,8 @@ IDIOMA = _default_lang
 TEXTOS = {
     "en": {
         "status_connecting": "Connecting service...",
-        "status_waiting": "Waiting for document...",
+        "status_waiting_app": "Waiting for Affinity to open...",
+        "status_menu": "On main menu",
         "status_paused": "Paused",
         "status_reconnecting": "Reconnecting...",
         "status_editing": "Editing: {}",
@@ -59,7 +61,10 @@ TEXTOS = {
         "lbl_ext": "Extension:",
         "lbl_start": "Autostart:",
         "btn_exit": "Close\nProgram",
-        "rpc_large": "Working in Affinity",
+        "rpc_hover_large": "Affinity Studio",
+        "rpc_hover_tool": "Working in Affinity",
+        "rpc_hover_home": "Main Menu",
+        "rpc_menu": "Browsing menus",
         "rpc_details": "Project: {}",
         "rpc_ext_only": "Editing {} file",
         "tray_pause": "Pause RPC",
@@ -73,7 +78,8 @@ TEXTOS = {
     },
     "es": {
         "status_connecting": "Conectando servicio...",
-        "status_waiting": "Esperando documento...",
+        "status_waiting_app": "Esperando a que Affinity abra...",
+        "status_menu": "En el menú principal",
         "status_paused": "Pausado",
         "status_reconnecting": "Reconectando...",
         "status_editing": "Editando: {}",
@@ -82,7 +88,10 @@ TEXTOS = {
         "lbl_ext": "Extensión:",
         "lbl_start": "Arrancar:",
         "btn_exit": "Cerrar\nPrograma",
-        "rpc_large": "Trabajando en Affinity",
+        "rpc_hover_large": "Affinity Studio",
+        "rpc_hover_tool": "Trabajando en Affinity",
+        "rpc_hover_home": "Menú Principal",
+        "rpc_menu": "Navegando por los menús",
         "rpc_details": "Proyecto: {}",
         "rpc_ext_only": "Editando archivo {}",
         "tray_pause": "Pausar RPC",
@@ -394,80 +403,118 @@ class RPCWorker(QThread):
     def run(self):
         while self.is_running:
             if self.is_active:
-                if self.rpc is None:
-                    try:
-                        self.rpc = Presence(CLIENT_ID)
-                        self.rpc.connect()
-                        self.last_rpc_state = None 
-                    except Exception:
+                # Verificamos si Affinity está abierto
+                affinity_running = False
+                try:
+                    for proc in psutil.process_iter(['name']):
+                        if proc.info['name'] and proc.info['name'].lower() == 'affinity.exe':
+                            affinity_running = True
+                            break
+                except Exception:
+                    pass
+
+                if not affinity_running:
+                    # Si está cerrado, cortamos todo el RPC y avisamos
+                    if self.rpc:
+                        try:
+                            self.rpc.clear()
+                            self.rpc.close()
+                        except:
+                            pass
                         self.rpc = None
+                    self.last_project = None
+                    self.last_rpc_state = None
+                    self.affinity.is_connected = False
+                    self.status_signal.emit(TEXTOS[IDIOMA]["status_waiting_app"])
+                
+                else:
+                    # Si Affinity está abierto, procesamos normalmente
+                    if self.rpc is None:
+                        try:
+                            self.rpc = Presence(CLIENT_ID)
+                            self.rpc.connect()
+                            self.last_rpc_state = None 
+                        except Exception:
+                            self.rpc = None
 
-                if self.rpc:
-                    proyecto_raw = self.affinity.obtener_proyecto()
-                    if proyecto_raw and self.is_active: 
+                    if self.rpc:
+                        proyecto_raw = self.affinity.obtener_proyecto()
                         
-                        nombre_base, ext = os.path.splitext(proyecto_raw)
-                        ext_limpia = ext.replace(".", "").upper().strip() 
+                        if proyecto_raw: 
+                            # Estamos editando un archivo
+                            nombre_base, ext = os.path.splitext(proyecto_raw)
+                            ext_limpia = ext.replace(".", "").upper().strip() 
 
-                        current_state = (proyecto_raw, self.privacy_mode, self.show_extension)
-                        
-                        details_text = None
-                        local_ui_text = ""
-
-                        if not self.privacy_mode and self.show_extension:
-                            details_text = TEXTOS[IDIOMA]["rpc_details"].format(proyecto_raw)
-                            local_ui_text = proyecto_raw
-
-                        elif not self.privacy_mode and not self.show_extension:
-                            details_text = TEXTOS[IDIOMA]["rpc_details"].format(nombre_base)
-                            local_ui_text = nombre_base
-
-                        elif self.privacy_mode and self.show_extension:
-                            if ext_limpia:
-                                details_text = TEXTOS[IDIOMA]["rpc_ext_only"].format(ext_limpia)
-                            else:
-                                details_text = None 
-                            local_ui_text = "***"
-
-                        elif self.privacy_mode and not self.show_extension:
+                            current_state = (proyecto_raw, self.privacy_mode, self.show_extension)
+                            
                             details_text = None
-                            local_ui_text = "***"
-                        
-                        self.status_signal.emit(TEXTOS[IDIOMA]["status_editing"].format(local_ui_text))
+                            local_ui_text = ""
+
+                            if not self.privacy_mode and self.show_extension:
+                                details_text = TEXTOS[IDIOMA]["rpc_details"].format(proyecto_raw)
+                                local_ui_text = proyecto_raw
+                            elif not self.privacy_mode and not self.show_extension:
+                                details_text = TEXTOS[IDIOMA]["rpc_details"].format(nombre_base)
+                                local_ui_text = nombre_base
+                            elif self.privacy_mode and self.show_extension:
+                                if ext_limpia:
+                                    details_text = TEXTOS[IDIOMA]["rpc_ext_only"].format(ext_limpia)
+                                else:
+                                    details_text = None 
+                                local_ui_text = "***"
+                            elif self.privacy_mode and not self.show_extension:
+                                details_text = None
+                                local_ui_text = "***"
                             
-                        if current_state != self.last_rpc_state:
-                            
-                            if self.last_project != proyecto_raw:
-                                self.start_time = int(time.time())
-                                self.last_project = proyecto_raw
-                            
-                            try:
-                                self.rpc.clear() 
+                            self.status_signal.emit(TEXTOS[IDIOMA]["status_editing"].format(local_ui_text))
                                 
-                                kwargs = {
-                                    "large_image": "logo_affinity",
-                                    "large_text": TEXTOS[IDIOMA]["rpc_large"],
-                                    "start": self.start_time
-                                }
+                            if current_state != self.last_rpc_state:
+                                if self.last_project != proyecto_raw:
+                                    self.start_time = int(time.time())
+                                    self.last_project = proyecto_raw
                                 
-                                if details_text:
-                                    kwargs["details"] = details_text
+                                try:
+                                    self.rpc.clear() 
                                     
-                                self.rpc.update(**kwargs)
-                                self.last_rpc_state = current_state
-                            except Exception:
-                                self.rpc = None
-                    else:
-                        if self.last_project is not None:
-                            self.last_project = None
-                            self.last_rpc_state = None
-                            if self.is_active:
-                                self.status_signal.emit(TEXTOS[IDIOMA]["status_waiting"])
-                            try:
-                                self.rpc.clear()
-                            except:
-                                pass
+                                    kwargs = {
+                                        "large_image": "logo_affinity",
+                                        "large_text": TEXTOS[IDIOMA]["rpc_hover_large"],
+                                        "small_image": "icon_tool",
+                                        "small_text": TEXTOS[IDIOMA]["rpc_hover_tool"],
+                                        "start": self.start_time
+                                    }
+                                    
+                                    if details_text:
+                                        kwargs["details"] = details_text
+                                        
+                                    self.rpc.update(**kwargs)
+                                    self.last_rpc_state = current_state
+                                except Exception:
+                                    self.rpc = None
+                        
+                        else:
+                            # Estado IDLE / En el menú principal
+                            current_state = "IDLE"
+                            self.status_signal.emit(TEXTOS[IDIOMA]["status_menu"])
+
+                            if current_state != self.last_rpc_state:
+                                self.start_time = int(time.time())
+                                self.last_project = "IDLE"
+                                try:
+                                    self.rpc.clear()
+                                    self.rpc.update(
+                                        details=TEXTOS[IDIOMA]["rpc_menu"],
+                                        large_image="logo_affinity",
+                                        large_text=TEXTOS[IDIOMA]["rpc_hover_large"],
+                                        small_image="icon_home",
+                                        small_text=TEXTOS[IDIOMA]["rpc_hover_home"],
+                                        start=self.start_time
+                                    )
+                                    self.last_rpc_state = current_state
+                                except Exception:
+                                    self.rpc = None
             else:
+                # El switch está desactivado manualmente
                 if self.last_project is not None or self.last_rpc_state is not None:
                     self.status_signal.emit(TEXTOS[IDIOMA]["status_paused"])
                     self.last_project = None
@@ -745,8 +792,8 @@ class MainWindow(QMainWindow):
         
         if self.worker.is_active:
             self.tray_toggle_action.setText(TEXTOS[IDIOMA]["tray_pause"])
-            if self.status_label.text() in [TEXTOS["es"]["status_waiting"], TEXTOS["en"]["status_waiting"]]:
-                self.status_label.setText(TEXTOS[IDIOMA]["status_waiting"])
+            if self.status_label.text() in [TEXTOS["es"]["status_waiting_app"], TEXTOS["en"]["status_waiting_app"]]:
+                pass # Se maneja en el hilo principal
         else:
             self.tray_toggle_action.setText(TEXTOS[IDIOMA]["tray_resume"])
             self.status_label.setText(TEXTOS[IDIOMA]["status_paused"])
