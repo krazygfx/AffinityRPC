@@ -9,18 +9,43 @@ import locale
 from pypresence import Presence
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QPushButton, QSystemTrayIcon, QMenu, QCheckBox)
-from PyQt6.QtCore import Qt, QPoint, QThread, pyqtSignal, QPropertyAnimation, pyqtProperty
-from PyQt6.QtGui import QIcon, QPainter, QColor, QBrush, QPen
+from PyQt6.QtCore import Qt, QPoint, QThread, pyqtSignal, QPropertyAnimation, pyqtProperty, QTimer
+from PyQt6.QtGui import QIcon, QPainter, QColor, QBrush, QPen, QPainterPath
 
 CLIENT_ID = '1530346476440522792'
 LOGO_PATH = 'logo.png' 
 APP_NAME = "AffinityRPC"
 
+# --- SISTEMA DE CONFIGURACIÓN ---
+CONFIG_DIR = os.path.join(os.getenv('APPDATA'), APP_NAME)
+CONFIG_FILE = os.path.join(CONFIG_DIR, 'config.json')
+
+def load_config():
+    default = {"rpc_active": True, "privacy_mode": False, "is_dark": True, "lang": None}
+    try:
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                default.update(json.load(f))
+    except Exception:
+        pass
+    return default
+
+def save_config(config_data):
+    try:
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f)
+    except Exception:
+        pass
+
+# --- IDIOMA (Actualizado para evitar el DeprecationWarning) ---
 try:
-    idioma_sistema = locale.getdefaultlocale()[0]
-    IDIOMA = "es" if idioma_sistema and idioma_sistema.startswith("es") else "en"
+    idioma_sistema = locale.getlocale()[0]
+    _default_lang = "es" if idioma_sistema and idioma_sistema.startswith("es") else "en"
 except:
-    IDIOMA = "en"
+    _default_lang = "en"
+
+IDIOMA = _default_lang
 
 TEXTOS = {
     "en": {
@@ -30,12 +55,14 @@ TEXTOS = {
         "status_reconnecting": "Reconnecting...",
         "status_editing": "Editing: {}",
         "lbl_discord": "Discord:",
+        "lbl_privacy": "Privacy:",
         "lbl_start": "Autostart:",
         "btn_exit": "Close\nProgram",
         "rpc_large": "Working in Affinity",
         "rpc_details": "Project: {}",
         "tray_pause": "Pause RPC",
         "tray_resume": "Resume RPC",
+        "tray_privacy": "Privacy Mode",
         "tray_start": "Start with Windows",
         "tray_open": "Open Panel",
         "tray_close": "Close",
@@ -48,12 +75,14 @@ TEXTOS = {
         "status_reconnecting": "Reconectando...",
         "status_editing": "Editando: {}",
         "lbl_discord": "Discord:",
+        "lbl_privacy": "Privacidad:",
         "lbl_start": "Arrancar:",
         "btn_exit": "Cerrar\nPrograma",
         "rpc_large": "Trabajando en Affinity",
         "rpc_details": "Proyecto: {}",
         "tray_pause": "Pausar RPC",
         "tray_resume": "Reanudar RPC",
+        "tray_privacy": "Modo Privacidad",
         "tray_start": "Iniciar con Windows",
         "tray_open": "Abrir Panel",
         "tray_close": "Cerrar",
@@ -158,16 +187,27 @@ class ToggleSwitch(QCheckBox):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         if self.isChecked():
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(QColor("#000000")))
+            if self.isEnabled():
+                painter.setBrush(QBrush(QColor("#000000")))
+            else:
+                painter.setBrush(QBrush(QColor("#555555")))
             painter.drawRoundedRect(0, 0, self.width(), self.height(), 15, 15)
             painter.setBrush(QBrush(QColor("#ffffff")))
             painter.drawEllipse(int(self._position), 3, 24, 24)
         else:
-            painter.setPen(QPen(QColor("#000000"), 2))
-            painter.setBrush(QBrush(QColor("#ffffff")))
+            if self.isEnabled():
+                painter.setPen(QPen(QColor("#000000"), 2))
+                painter.setBrush(QBrush(QColor("#ffffff")))
+            else:
+                painter.setPen(QPen(QColor("#888888"), 2))
+                painter.setBrush(QBrush(QColor("#dddddd")))
             painter.drawRoundedRect(1, 1, self.width()-2, self.height()-2, 14, 14)
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(QColor("#000000")))
+            
+            if self.isEnabled():
+                painter.setBrush(QBrush(QColor("#000000")))
+            else:
+                painter.setBrush(QBrush(QColor("#888888")))
             painter.drawEllipse(int(self._position), 3, 24, 24)
         painter.end()
 
@@ -187,13 +227,16 @@ class ThemeButton(QPushButton):
         super().paintEvent(event) 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
         if self.is_dark:
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor("#eeeeee"))
-            painter.drawEllipse(7, 7, 16, 16)
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationOut)
-            painter.setBrush(QColor(0, 0, 0, 255))
-            painter.drawEllipse(11, 4, 14, 14)
+            path = QPainterPath()
+            path.addEllipse(7, 7, 16, 16)
+            bite = QPainterPath()
+            bite.addEllipse(11, 4, 14, 14)
+            crescent = path.subtracted(bite)
+            painter.drawPath(crescent)
         else:
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor("#333333"))
@@ -314,6 +357,9 @@ class RPCWorker(QThread):
         super().__init__()
         self.is_running = True
         self.is_active = True
+        self.privacy_mode = False  
+        self.last_project = None   
+        self.last_rpc_state = None  
         self.affinity = AffinityMCP()
         self.rpc = None
         self.start_time = int(time.time())
@@ -326,36 +372,63 @@ class RPCWorker(QThread):
                     try:
                         self.rpc = Presence(CLIENT_ID)
                         self.rpc.connect()
+                        self.last_rpc_state = None 
                     except Exception:
                         self.rpc = None
 
                 if self.rpc:
                     proyecto = self.affinity.obtener_proyecto()
                     if proyecto and self.is_active: 
-                        self.status_signal.emit(TEXTOS[IDIOMA]["status_editing"].format(proyecto))
-                        try:
-                            self.rpc.update(
-                                details=TEXTOS[IDIOMA]["rpc_details"].format(proyecto), 
-                                large_image="logo_affinity", 
-                                large_text=TEXTOS[IDIOMA]["rpc_large"], 
-                                start=self.start_time
-                            )
-                        except Exception:
-                            self.rpc = None
+                        
+                        current_state = (proyecto, self.privacy_mode)
+                        
+                        if self.privacy_mode:
+                            self.status_signal.emit(TEXTOS[IDIOMA]["status_editing"].format("***"))
+                        else:
+                            self.status_signal.emit(TEXTOS[IDIOMA]["status_editing"].format(proyecto))
+                            
+                        if current_state != self.last_rpc_state:
+                            if self.last_project != proyecto:
+                                self.start_time = int(time.time())
+                                self.last_project = proyecto
+                            
+                            try:
+                                if self.privacy_mode:
+                                    self.rpc.update(
+                                        large_image="logo_affinity", 
+                                        large_text=TEXTOS[IDIOMA]["rpc_large"], 
+                                        start=self.start_time
+                                    )
+                                else:
+                                    self.rpc.update(
+                                        details=TEXTOS[IDIOMA]["rpc_details"].format(proyecto), 
+                                        large_image="logo_affinity", 
+                                        large_text=TEXTOS[IDIOMA]["rpc_large"], 
+                                        start=self.start_time
+                                    )
+                                self.last_rpc_state = current_state
+                            except Exception:
+                                self.rpc = None
                     else:
-                        if self.is_active:
-                            self.status_signal.emit(TEXTOS[IDIOMA]["status_waiting"])
+                        if self.last_project is not None:
+                            self.last_project = None
+                            self.last_rpc_state = None
+                            if self.is_active:
+                                self.status_signal.emit(TEXTOS[IDIOMA]["status_waiting"])
+                            try:
+                                self.rpc.clear()
+                            except:
+                                pass
+            else:
+                if self.last_project is not None or self.last_rpc_state is not None:
+                    self.status_signal.emit(TEXTOS[IDIOMA]["status_paused"])
+                    self.last_project = None
+                    self.last_rpc_state = None
+                    if self.rpc:
                         try:
                             self.rpc.clear()
                         except:
                             pass
-            else:
-                self.status_signal.emit(TEXTOS[IDIOMA]["status_paused"])
-                if self.rpc:
-                    try:
-                        self.rpc.clear()
-                    except:
-                        pass
             
             self.wake_event.wait(10)
             self.wake_event.clear()
@@ -373,20 +446,27 @@ class RPCWorker(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        
+        self.config = load_config()
+        
+        global IDIOMA
+        if self.config["lang"]:
+            IDIOMA = self.config["lang"]
+
         self.worker = RPCWorker()
+        self.worker.is_active = self.config["rpc_active"]
+        self.worker.privacy_mode = self.config.get("privacy_mode", False)
         self.worker.status_signal.connect(self.actualizar_estado)
         self.worker.start()
 
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.resize(360, 230)
+        self.resize(360, 270)
         self.setWindowIcon(QIcon(ruta_recurso(LOGO_PATH)))
 
         self.central_widget = QWidget()
         self.central_widget.setObjectName("GlassWidget")
         self.setCentralWidget(self.central_widget)
-
-        self.setStyleSheet(DARK_STYLE)
 
         layout = QVBoxLayout(self.central_widget)
         layout.setContentsMargins(15, 12, 15, 18)
@@ -405,13 +485,18 @@ class MainWindow(QMainWindow):
         
         title_bar.addStretch()
         
-        # --- NUEVO BOTÓN DE IDIOMA ---
         self.btn_lang = QPushButton("ES" if IDIOMA == "es" else "EN")
         self.btn_lang.setObjectName("TitleBtn")
         self.btn_lang.setFixedSize(30, 30)
         self.btn_lang.clicked.connect(self.toggle_language)
         
         self.btn_theme = ThemeButton()
+        self.btn_theme.is_dark = self.config["is_dark"]
+        if self.btn_theme.is_dark:
+            self.setStyleSheet(DARK_STYLE)
+        else:
+            self.setStyleSheet(LIGHT_STYLE)
+            
         self.btn_theme.clicked.connect(self.toggle_theme)
 
         btn_min = QPushButton("━")
@@ -446,15 +531,35 @@ class MainWindow(QMainWindow):
         switches_layout = QVBoxLayout()
         switches_layout.setSpacing(10)
         
+        # Switch RPC
         switch_rpc_container = QHBoxLayout()
         self.lbl_switch_rpc = QLabel(TEXTOS[IDIOMA]["lbl_discord"])
         self.lbl_switch_rpc.setStyleSheet("font-size: 13px; font-weight: bold;")
         self.btn_toggle_rpc = ToggleSwitch()
+        self.btn_toggle_rpc.setChecked(self.worker.is_active)
         self.btn_toggle_rpc.clicked.connect(self.toggle_rpc)
         switch_rpc_container.addWidget(self.lbl_switch_rpc)
         switch_rpc_container.addWidget(self.btn_toggle_rpc)
         switch_rpc_container.addStretch()
         
+        # Switch Privacidad CON COOLDOWN
+        switch_privacy_container = QHBoxLayout()
+        self.lbl_switch_privacy = QLabel(TEXTOS[IDIOMA]["lbl_privacy"])
+        self.lbl_switch_privacy.setStyleSheet("font-size: 13px; font-weight: bold;")
+        self.btn_toggle_privacy = ToggleSwitch()
+        self.btn_toggle_privacy.setChecked(self.worker.privacy_mode)
+        self.btn_toggle_privacy.clicked.connect(self.toggle_privacy)
+        
+        self.lbl_privacy_cd = QLabel("")
+        self.lbl_privacy_cd.setStyleSheet("font-size: 12px; color: #aaaaaa;")
+        self.lbl_privacy_cd.hide() 
+
+        switch_privacy_container.addWidget(self.lbl_switch_privacy)
+        switch_privacy_container.addWidget(self.btn_toggle_privacy)
+        switch_privacy_container.addWidget(self.lbl_privacy_cd)
+        switch_privacy_container.addStretch()
+
+        # Switch Autostart
         switch_start_container = QHBoxLayout()
         self.lbl_switch_start = QLabel(TEXTOS[IDIOMA]["lbl_start"])
         self.lbl_switch_start.setStyleSheet("font-size: 13px; font-weight: bold;")
@@ -466,10 +571,11 @@ class MainWindow(QMainWindow):
         switch_start_container.addStretch()
         
         switches_layout.addLayout(switch_rpc_container)
+        switches_layout.addLayout(switch_privacy_container)
         switches_layout.addLayout(switch_start_container)
 
         self.btn_exit = QPushButton(TEXTOS[IDIOMA]["btn_exit"])
-        self.btn_exit.setFixedHeight(50) 
+        self.btn_exit.setFixedHeight(60) 
         self.btn_exit.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_exit.clicked.connect(self.cerrar_aplicacion)
 
@@ -479,6 +585,11 @@ class MainWindow(QMainWindow):
 
         self.old_pos = self.pos()
 
+        # --- TIMER PARA EL COOLDOWN ---
+        self.cooldown_seconds = 0
+        self.cooldown_timer = QTimer(self)
+        self.cooldown_timer.timeout.connect(self.update_cooldown)
+
         # --- BANDEJA DEL SISTEMA ---
         self.tray_icon = QSystemTrayIcon(self)
         self.tray_icon.setIcon(QIcon(ruta_recurso(LOGO_PATH)))
@@ -486,6 +597,11 @@ class MainWindow(QMainWindow):
         tray_menu = QMenu()
         self.tray_toggle_action = tray_menu.addAction(TEXTOS[IDIOMA]["tray_pause"])
         self.tray_toggle_action.triggered.connect(self.tray_toggle_click)
+        
+        self.tray_privacy_action = tray_menu.addAction(TEXTOS[IDIOMA]["tray_privacy"])
+        self.tray_privacy_action.setCheckable(True)
+        self.tray_privacy_action.setChecked(self.worker.privacy_mode)
+        self.tray_privacy_action.triggered.connect(self.tray_privacy_click)
         
         self.tray_startup_action = tray_menu.addAction(TEXTOS[IDIOMA]["tray_start"])
         self.tray_startup_action.setCheckable(True)
@@ -503,6 +619,33 @@ class MainWindow(QMainWindow):
         self.tray_icon.activated.connect(self.tray_click)
         self.tray_icon.show()
 
+    # --- LOGICA DEL COOLDOWN ---
+    def iniciar_cooldown(self):
+        self.cooldown_seconds = 15
+        self.btn_toggle_privacy.setEnabled(False) 
+        self.tray_privacy_action.setEnabled(False) 
+        self.lbl_privacy_cd.setText(f"({self.cooldown_seconds}s)")
+        self.lbl_privacy_cd.show()
+        self.cooldown_timer.start(1000) 
+
+    def update_cooldown(self):
+        self.cooldown_seconds -= 1
+        if self.cooldown_seconds > 0:
+            self.lbl_privacy_cd.setText(f"({self.cooldown_seconds}s)")
+        else:
+            self.cooldown_timer.stop()
+            self.btn_toggle_privacy.setEnabled(True) 
+            self.tray_privacy_action.setEnabled(True) 
+            self.lbl_privacy_cd.hide() 
+
+    # --- FUNCIONES DE GUARDADO ---
+    def guardar_config_actual(self):
+        self.config["rpc_active"] = self.worker.is_active
+        self.config["privacy_mode"] = self.worker.privacy_mode
+        self.config["is_dark"] = self.btn_theme.is_dark
+        self.config["lang"] = IDIOMA
+        save_config(self.config)
+
     # --- FUNCIONES DE VENTANA ---
     def actualizar_estado(self, texto):
         self.status_label.setText(texto)
@@ -513,18 +656,20 @@ class MainWindow(QMainWindow):
             self.setStyleSheet(DARK_STYLE)
         else:
             self.setStyleSheet(LIGHT_STYLE)
+        self.guardar_config_actual()
 
     def toggle_language(self):
         global IDIOMA
-
         IDIOMA = "en" if IDIOMA == "es" else "es"
         
         self.btn_lang.setText("ES" if IDIOMA == "es" else "EN")
         
         self.lbl_switch_rpc.setText(TEXTOS[IDIOMA]["lbl_discord"])
+        self.lbl_switch_privacy.setText(TEXTOS[IDIOMA]["lbl_privacy"])
         self.lbl_switch_start.setText(TEXTOS[IDIOMA]["lbl_start"])
         self.btn_exit.setText(TEXTOS[IDIOMA]["btn_exit"])
         
+        self.tray_privacy_action.setText(TEXTOS[IDIOMA]["tray_privacy"])
         self.tray_startup_action.setText(TEXTOS[IDIOMA]["tray_start"])
         self.tray_open_action.setText(TEXTOS[IDIOMA]["tray_open"])
         self.tray_close_action.setText(TEXTOS[IDIOMA]["tray_close"])
@@ -537,8 +682,8 @@ class MainWindow(QMainWindow):
             self.tray_toggle_action.setText(TEXTOS[IDIOMA]["tray_resume"])
             self.status_label.setText(TEXTOS[IDIOMA]["status_paused"])
             
-        # Despertamos al worker para que actualice Discord instantáneamente
         self.worker.wake_event.set()
+        self.guardar_config_actual()
 
     def toggle_rpc(self, checked):
         self.worker.is_active = checked
@@ -549,6 +694,14 @@ class MainWindow(QMainWindow):
             self.tray_toggle_action.setText(TEXTOS[IDIOMA]["tray_resume"])
             self.status_label.setText(TEXTOS[IDIOMA]["status_paused"])
         self.worker.wake_event.set()
+        self.guardar_config_actual()
+
+    def toggle_privacy(self, checked):
+        self.worker.privacy_mode = checked
+        self.tray_privacy_action.setChecked(checked) 
+        self.worker.wake_event.set()
+        self.guardar_config_actual()
+        self.iniciar_cooldown() 
 
     def toggle_autostart(self, checked):
         set_autostart(checked)
@@ -558,6 +711,10 @@ class MainWindow(QMainWindow):
         nuevo_estado = not self.btn_toggle_rpc.isChecked()
         self.btn_toggle_rpc.setChecked(nuevo_estado)
         self.toggle_rpc(nuevo_estado)
+        
+    def tray_privacy_click(self, checked):
+        self.btn_toggle_privacy.setChecked(checked) 
+        self.toggle_privacy(checked)
         
     def tray_startup_click(self, checked):
         self.btn_toggle_start.setChecked(checked)
