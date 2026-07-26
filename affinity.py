@@ -21,7 +21,7 @@ CONFIG_DIR = os.path.join(os.getenv('APPDATA'), APP_NAME)
 CONFIG_FILE = os.path.join(CONFIG_DIR, 'config.json')
 
 def load_config():
-    default = {"rpc_active": True, "privacy_mode": False, "is_dark": True, "lang": None}
+    default = {"rpc_active": True, "privacy_mode": False, "show_extension": True, "is_dark": True, "lang": None}
     try:
         if os.path.exists(CONFIG_FILE):
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
@@ -38,7 +38,7 @@ def save_config(config_data):
     except Exception:
         pass
 
-# --- IDIOMA (Actualizado para evitar el DeprecationWarning) ---
+# --- IDIOMA ---
 try:
     idioma_sistema = locale.getlocale()[0]
     _default_lang = "es" if idioma_sistema and idioma_sistema.startswith("es") else "en"
@@ -56,13 +56,16 @@ TEXTOS = {
         "status_editing": "Editing: {}",
         "lbl_discord": "Discord:",
         "lbl_privacy": "Privacy:",
+        "lbl_ext": "Extension:",
         "lbl_start": "Autostart:",
         "btn_exit": "Close\nProgram",
         "rpc_large": "Working in Affinity",
         "rpc_details": "Project: {}",
+        "rpc_ext_only": "Editing {} file",
         "tray_pause": "Pause RPC",
         "tray_resume": "Resume RPC",
         "tray_privacy": "Privacy Mode",
+        "tray_ext": "Show Extension",
         "tray_start": "Start with Windows",
         "tray_open": "Open Panel",
         "tray_close": "Close",
@@ -76,13 +79,16 @@ TEXTOS = {
         "status_editing": "Editando: {}",
         "lbl_discord": "Discord:",
         "lbl_privacy": "Privacidad:",
+        "lbl_ext": "Extensión:",
         "lbl_start": "Arrancar:",
         "btn_exit": "Cerrar\nPrograma",
         "rpc_large": "Trabajando en Affinity",
         "rpc_details": "Proyecto: {}",
+        "rpc_ext_only": "Editando archivo {}",
         "tray_pause": "Pausar RPC",
         "tray_resume": "Reanudar RPC",
         "tray_privacy": "Modo Privacidad",
+        "tray_ext": "Mostrar Extensión",
         "tray_start": "Iniciar con Windows",
         "tray_open": "Abrir Panel",
         "tray_close": "Cerrar",
@@ -329,13 +335,22 @@ class AffinityMCP:
     def obtener_proyecto(self):
         if not self.is_connected:
             if not self.conectar_y_saludar(): return None
+            
         js_code = """
         try {
-            const docModule = require('/document'); const appModule = require('/application');
+            const docModule = require('/document'); 
+            const appModule = require('/application');
             let currentDoc = null;
             if (docModule && docModule.Document && docModule.Document.current) currentDoc = docModule.Document.current;
             else if (appModule && appModule.app && appModule.app.documents && appModule.app.documents.current) currentDoc = appModule.app.documents.current;
-            if (currentDoc) console.log('TITULO:' + currentDoc.title); else console.log('VACIO');
+            
+            if (currentDoc) {
+                let p = currentDoc.path || "";
+                let t = currentDoc.title || "";
+                console.log('DOC_DATA::' + t + '::' + p);
+            } else {
+                console.log('VACIO');
+            }
         } catch(e) { console.log('ERROR_JS'); }
         """
         res = self._llamar_herramienta("execute_script", {"script": js_code})
@@ -344,8 +359,18 @@ class AffinityMCP:
             content = res["result"].get("content", [])
             if content:
                 texto = content[0].get("text", "").strip()
-                if "TITULO:" in texto: return texto.split("TITULO:")[1].strip().split(".af")[0]
-                elif "preamble" in texto.lower() or "not yet been read" in texto.lower(): self.is_connected = False
+                
+                if "DOC_DATA::" in texto:
+                    partes = texto.split("DOC_DATA::")[1].split("::")
+                    titulo = partes[0].strip().replace("*", "") 
+                    ruta = partes[1].strip() if len(partes) > 1 else ""
+                    
+                    if ruta and ruta != "undefined":
+                        return os.path.basename(ruta) 
+                    else:
+                        return titulo 
+                elif "preamble" in texto.lower() or "not yet been read" in texto.lower(): 
+                    self.is_connected = False
         elif res and "error":
             if res["error"].get("code") == -32600: self.is_connected = False
         return None
@@ -358,6 +383,7 @@ class RPCWorker(QThread):
         self.is_running = True
         self.is_active = True
         self.privacy_mode = False  
+        self.show_extension = True 
         self.last_project = None   
         self.last_rpc_state = None  
         self.affinity = AffinityMCP()
@@ -377,35 +403,57 @@ class RPCWorker(QThread):
                         self.rpc = None
 
                 if self.rpc:
-                    proyecto = self.affinity.obtener_proyecto()
-                    if proyecto and self.is_active: 
+                    proyecto_raw = self.affinity.obtener_proyecto()
+                    if proyecto_raw and self.is_active: 
                         
-                        current_state = (proyecto, self.privacy_mode)
+                        nombre_base, ext = os.path.splitext(proyecto_raw)
+                        ext_limpia = ext.replace(".", "").upper().strip() 
+
+                        current_state = (proyecto_raw, self.privacy_mode, self.show_extension)
                         
-                        if self.privacy_mode:
-                            self.status_signal.emit(TEXTOS[IDIOMA]["status_editing"].format("***"))
-                        else:
-                            self.status_signal.emit(TEXTOS[IDIOMA]["status_editing"].format(proyecto))
+                        details_text = None
+                        local_ui_text = ""
+
+                        if not self.privacy_mode and self.show_extension:
+                            details_text = TEXTOS[IDIOMA]["rpc_details"].format(proyecto_raw)
+                            local_ui_text = proyecto_raw
+
+                        elif not self.privacy_mode and not self.show_extension:
+                            details_text = TEXTOS[IDIOMA]["rpc_details"].format(nombre_base)
+                            local_ui_text = nombre_base
+
+                        elif self.privacy_mode and self.show_extension:
+                            if ext_limpia:
+                                details_text = TEXTOS[IDIOMA]["rpc_ext_only"].format(ext_limpia)
+                            else:
+                                details_text = None 
+                            local_ui_text = "***"
+
+                        elif self.privacy_mode and not self.show_extension:
+                            details_text = None
+                            local_ui_text = "***"
+                        
+                        self.status_signal.emit(TEXTOS[IDIOMA]["status_editing"].format(local_ui_text))
                             
                         if current_state != self.last_rpc_state:
-                            if self.last_project != proyecto:
+                            
+                            if self.last_project != proyecto_raw:
                                 self.start_time = int(time.time())
-                                self.last_project = proyecto
+                                self.last_project = proyecto_raw
                             
                             try:
-                                if self.privacy_mode:
-                                    self.rpc.update(
-                                        large_image="logo_affinity", 
-                                        large_text=TEXTOS[IDIOMA]["rpc_large"], 
-                                        start=self.start_time
-                                    )
-                                else:
-                                    self.rpc.update(
-                                        details=TEXTOS[IDIOMA]["rpc_details"].format(proyecto), 
-                                        large_image="logo_affinity", 
-                                        large_text=TEXTOS[IDIOMA]["rpc_large"], 
-                                        start=self.start_time
-                                    )
+                                self.rpc.clear() 
+                                
+                                kwargs = {
+                                    "large_image": "logo_affinity",
+                                    "large_text": TEXTOS[IDIOMA]["rpc_large"],
+                                    "start": self.start_time
+                                }
+                                
+                                if details_text:
+                                    kwargs["details"] = details_text
+                                    
+                                self.rpc.update(**kwargs)
                                 self.last_rpc_state = current_state
                             except Exception:
                                 self.rpc = None
@@ -456,12 +504,13 @@ class MainWindow(QMainWindow):
         self.worker = RPCWorker()
         self.worker.is_active = self.config["rpc_active"]
         self.worker.privacy_mode = self.config.get("privacy_mode", False)
+        self.worker.show_extension = self.config.get("show_extension", True)
         self.worker.status_signal.connect(self.actualizar_estado)
         self.worker.start()
 
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.resize(360, 270)
+        self.resize(360, 310) 
         self.setWindowIcon(QIcon(ruta_recurso(LOGO_PATH)))
 
         self.central_widget = QWidget()
@@ -542,7 +591,7 @@ class MainWindow(QMainWindow):
         switch_rpc_container.addWidget(self.btn_toggle_rpc)
         switch_rpc_container.addStretch()
         
-        # Switch Privacidad CON COOLDOWN
+        # Switch Privacidad
         switch_privacy_container = QHBoxLayout()
         self.lbl_switch_privacy = QLabel(TEXTOS[IDIOMA]["lbl_privacy"])
         self.lbl_switch_privacy.setStyleSheet("font-size: 13px; font-weight: bold;")
@@ -559,6 +608,17 @@ class MainWindow(QMainWindow):
         switch_privacy_container.addWidget(self.lbl_privacy_cd)
         switch_privacy_container.addStretch()
 
+        # Switch Mostrar Extensión
+        switch_ext_container = QHBoxLayout()
+        self.lbl_switch_ext = QLabel(TEXTOS[IDIOMA]["lbl_ext"])
+        self.lbl_switch_ext.setStyleSheet("font-size: 13px; font-weight: bold;")
+        self.btn_toggle_ext = ToggleSwitch()
+        self.btn_toggle_ext.setChecked(self.worker.show_extension)
+        self.btn_toggle_ext.clicked.connect(self.toggle_extension)
+        switch_ext_container.addWidget(self.lbl_switch_ext)
+        switch_ext_container.addWidget(self.btn_toggle_ext)
+        switch_ext_container.addStretch()
+
         # Switch Autostart
         switch_start_container = QHBoxLayout()
         self.lbl_switch_start = QLabel(TEXTOS[IDIOMA]["lbl_start"])
@@ -572,6 +632,7 @@ class MainWindow(QMainWindow):
         
         switches_layout.addLayout(switch_rpc_container)
         switches_layout.addLayout(switch_privacy_container)
+        switches_layout.addLayout(switch_ext_container) 
         switches_layout.addLayout(switch_start_container)
 
         self.btn_exit = QPushButton(TEXTOS[IDIOMA]["btn_exit"])
@@ -602,6 +663,11 @@ class MainWindow(QMainWindow):
         self.tray_privacy_action.setCheckable(True)
         self.tray_privacy_action.setChecked(self.worker.privacy_mode)
         self.tray_privacy_action.triggered.connect(self.tray_privacy_click)
+
+        self.tray_ext_action = tray_menu.addAction(TEXTOS[IDIOMA]["tray_ext"])
+        self.tray_ext_action.setCheckable(True)
+        self.tray_ext_action.setChecked(self.worker.show_extension)
+        self.tray_ext_action.triggered.connect(self.tray_ext_click)
         
         self.tray_startup_action = tray_menu.addAction(TEXTOS[IDIOMA]["tray_start"])
         self.tray_startup_action.setCheckable(True)
@@ -642,6 +708,7 @@ class MainWindow(QMainWindow):
     def guardar_config_actual(self):
         self.config["rpc_active"] = self.worker.is_active
         self.config["privacy_mode"] = self.worker.privacy_mode
+        self.config["show_extension"] = self.worker.show_extension
         self.config["is_dark"] = self.btn_theme.is_dark
         self.config["lang"] = IDIOMA
         save_config(self.config)
@@ -666,10 +733,12 @@ class MainWindow(QMainWindow):
         
         self.lbl_switch_rpc.setText(TEXTOS[IDIOMA]["lbl_discord"])
         self.lbl_switch_privacy.setText(TEXTOS[IDIOMA]["lbl_privacy"])
+        self.lbl_switch_ext.setText(TEXTOS[IDIOMA]["lbl_ext"]) 
         self.lbl_switch_start.setText(TEXTOS[IDIOMA]["lbl_start"])
         self.btn_exit.setText(TEXTOS[IDIOMA]["btn_exit"])
         
         self.tray_privacy_action.setText(TEXTOS[IDIOMA]["tray_privacy"])
+        self.tray_ext_action.setText(TEXTOS[IDIOMA]["tray_ext"]) 
         self.tray_startup_action.setText(TEXTOS[IDIOMA]["tray_start"])
         self.tray_open_action.setText(TEXTOS[IDIOMA]["tray_open"])
         self.tray_close_action.setText(TEXTOS[IDIOMA]["tray_close"])
@@ -703,6 +772,12 @@ class MainWindow(QMainWindow):
         self.guardar_config_actual()
         self.iniciar_cooldown() 
 
+    def toggle_extension(self, checked):
+        self.worker.show_extension = checked
+        self.tray_ext_action.setChecked(checked) 
+        self.worker.wake_event.set()
+        self.guardar_config_actual()
+
     def toggle_autostart(self, checked):
         set_autostart(checked)
         self.tray_startup_action.setChecked(checked)
@@ -715,6 +790,10 @@ class MainWindow(QMainWindow):
     def tray_privacy_click(self, checked):
         self.btn_toggle_privacy.setChecked(checked) 
         self.toggle_privacy(checked)
+
+    def tray_ext_click(self, checked):
+        self.btn_toggle_ext.setChecked(checked)
+        self.toggle_extension(checked)
         
     def tray_startup_click(self, checked):
         self.btn_toggle_start.setChecked(checked)
