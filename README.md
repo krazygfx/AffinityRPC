@@ -25,7 +25,7 @@ A custom Discord Rich Presence integration for Affinity Studio by Canva. It disp
 ## Prerequisites
 
 The program communicates with Affinity via its local MCP server. You must enable this feature before running the application:
-1. Open any Affinity application.
+1. Open Affinity application.
 2. Navigate to the Settings or Preferences menu.
 3. Locate and enable the local MCP server option (operating on port 6767 by default).
 
