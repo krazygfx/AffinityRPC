@@ -12,22 +12,19 @@
   <img src="https://github.com/user-attachments/assets/7f50f19d-c246-4663-9364-88c796640d98" alt="License">
 </p>
 
-
-
 A custom Discord Rich Presence integration for Affinity Studio by Canva. It displays your currently active project status directly on your Discord profile using a clean, native, and lightweight interface.
 
 # AffinityRPC - Discord Rich Presence
 
 <img width="2000" height="1000" alt="PRUEBA" src="https://github.com/user-attachments/assets/24e4b700-1c55-4a3b-961b-0b6a1079686f" />
 
-A custom Discord Rich Presence integration for Affinity Studio by Canva. It displays your currently active project status directly on your Discord profile.
-
 ## Prerequisites
 
-The program communicates with Affinity via its local MCP server. You must enable this feature before running the application:
-1. Open Affinity application.
-2. Navigate to the Settings or Preferences menu.
-3. Locate and enable the local MCP server option (operating on port 6767 by default).
+The program communicates with Affinity via its local MCP server. You must enable this feature within the application before running the RPC:
+1. Open Affinity.
+2. Navigate to **Settings**.
+3. Select the **Model Context Protocol** tab from the left sidebar.
+4. Turn on the **Enable Affinity MCP** option.
 
 ## Installation
 
