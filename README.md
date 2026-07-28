@@ -58,7 +58,7 @@ If you prefer to inspect and run the code manually:
 * **System Tray Integration:** Runs silently in the background with a fully featured context menu for quick access.
 * **Autostart:** Configurable option to launch seamlessly with Windows.
 
-* ### Troubleshooting: Stuck on "Browsing menus"
+## Troubleshooting: Stuck on "Browsing menus"
 
 Occasionally, your Discord Rich Presence might get stuck displaying **"Browsing menus"** even when you have a document actively open. 
 
