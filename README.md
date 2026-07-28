@@ -16,7 +16,7 @@ A custom Discord Rich Presence integration for Affinity Studio by Canva. It disp
 
 # AffinityRPC - Discord Rich Presence
 
-<img width="2000" height="1000" alt="PRUEBA" src="https://github.com/user-attachments/assets/24e4b700-1c55-4a3b-961b-0b6a1079686f" />
+<img width="50%" alt="PRUEBA" src="https://github.com/user-attachments/assets/24e4b700-1c55-4a3b-961b-0b6a1079686f" />
 
 ## Prerequisites
 
